@@ -21,6 +21,8 @@ import ee.carlrobert.codegpt.completions.ToolwindowChatCompletionRequestHandler;
 import ee.carlrobert.codegpt.conversations.Conversation;
 import ee.carlrobert.codegpt.conversations.ConversationService;
 import ee.carlrobert.codegpt.conversations.message.Message;
+import ee.carlrobert.codegpt.mcp.ChatAllowedTools;
+import ee.carlrobert.codegpt.mcp.MCPCompletionResponseEventListener;
 import ee.carlrobert.codegpt.psistructure.PsiStructureProvider;
 import ee.carlrobert.codegpt.psistructure.models.ClassStructure;
 import ee.carlrobert.codegpt.settings.GeneralSettings;
@@ -78,6 +80,7 @@ public class ChatToolWindowTabPanel implements Disposable {
   private final ChatToolWindowScrollablePanel toolWindowScrollablePanel;
   private final PsiStructureRepository psiStructureRepository;
   private final TagManager tagManager;
+  private final ChatAllowedTools chatAllowedTools;
 
   private @Nullable ToolwindowChatCompletionRequestHandler requestHandler;
 
@@ -88,6 +91,7 @@ public class ChatToolWindowTabPanel implements Disposable {
     conversationService = ConversationService.getInstance();
     toolWindowScrollablePanel = new ChatToolWindowScrollablePanel();
     tagManager = new TagManager(this);
+    chatAllowedTools = new ChatAllowedTools();
     this.psiStructureRepository = new PsiStructureRepository(
         this,
         project,
@@ -350,19 +354,24 @@ public class ChatToolWindowTabPanel implements Disposable {
     userMessagePanel.disableActions(List.of("RELOAD", "DELETE"));
     responseMessagePanel.disableActions(List.of("COPY"));
 
-    requestHandler = new ToolwindowChatCompletionRequestHandler(
-        project,
-        new ToolWindowCompletionResponseEventListener(
+    var completionResponseEventListener = new ToolWindowCompletionResponseEventListener(
             project,
             userMessagePanel,
             responseMessagePanel,
             totalTokensPanel,
             userInputPanel) {
-          @Override
-          public void handleTokensExceededPolicyAccepted() {
-            call(callParameters, responseMessagePanel, userMessagePanel);
-          }
-        });
+      @Override
+      public void handleTokensExceededPolicyAccepted() {
+        call(callParameters, responseMessagePanel, userMessagePanel);
+      }
+    };
+
+    requestHandler = new ToolwindowChatCompletionRequestHandler(
+        project,
+        new MCPCompletionResponseEventListener(
+            project, responseMessagePanel, chatAllowedTools, completionResponseEventListener
+        )
+    );
     ApplicationManager.getApplication()
         .executeOnPooledThread(() -> requestHandler.call(callParameters));
   }

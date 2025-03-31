@@ -3,6 +3,7 @@ package ee.carlrobert.codegpt.completions.factory
 import com.intellij.openapi.components.service
 import ee.carlrobert.codegpt.completions.BaseRequestFactory
 import ee.carlrobert.codegpt.completions.ChatCompletionParameters
+import ee.carlrobert.codegpt.mcp.MCPClientService
 import ee.carlrobert.codegpt.settings.configuration.ConfigurationSettings
 import ee.carlrobert.codegpt.settings.prompts.PromptsSettings
 import ee.carlrobert.codegpt.settings.service.anthropic.AnthropicSettings
@@ -18,8 +19,12 @@ class ClaudeRequestFactory : BaseRequestFactory() {
             isStream = true
 
             val selectedPersona = service<PromptsSettings>().state.personas.selectedPersona
-            if (!selectedPersona.disabled) {
-                system = PromptsSettings.getSelectedPersonaSystemPrompt()
+            val mcpDescription = service<MCPClientService>().mcpDescription
+
+            system = if (selectedPersona.disabled) {
+                mcpDescription
+            } else {
+                "${PromptsSettings.getSelectedPersonaSystemPrompt()}\n\n$mcpDescription"
             }
 
             messages = params.conversation.messages

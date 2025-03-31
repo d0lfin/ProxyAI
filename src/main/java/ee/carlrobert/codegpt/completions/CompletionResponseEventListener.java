@@ -7,24 +7,15 @@ import ee.carlrobert.llm.client.openai.completion.ErrorDetails;
 
 public interface CompletionResponseEventListener {
 
-  default void handleMessage(String message) {
-  }
+  void handleMessage(String message);
 
-  default void handleError(ErrorDetails error, Throwable ex) {
-  }
+  void handleError(ErrorDetails error, Throwable ex);
 
-  default void handleTokensExceeded(Conversation conversation, Message message) {
-  }
+  void handleTokensExceeded(Conversation conversation, Message message);
 
-  default void handleCompleted(String fullMessage) {
-  }
+  void handleCompleted(String fullMessage, ChatCompletionParameters callParameters);
 
-  default void handleCompleted(String fullMessage, ChatCompletionParameters callParameters) {
-  }
+  void handleCodeGPTEvent(CodeGPTEvent event);
 
-  default void handleCodeGPTEvent(CodeGPTEvent event) {
-  }
-
-  default void handleRequestOpen() {
-  }
+  void handleRequestOpen();
 }

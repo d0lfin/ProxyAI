@@ -16,8 +16,8 @@ public class ToolwindowChatCompletionRequestHandler {
   public ToolwindowChatCompletionRequestHandler(
       Project project,
       CompletionResponseEventListener completionResponseEventListener) {
-    this.project = project;
-    this.completionResponseEventListener = completionResponseEventListener;
+      this.project = project;
+      this.completionResponseEventListener = completionResponseEventListener;
   }
 
   public void call(ChatCompletionParameters callParameters) {
@@ -49,7 +49,9 @@ public class ToolwindowChatCompletionRequestHandler {
           new ChatCompletionEventListener(
               project,
               callParameters,
-              completionResponseEventListener));
+              completionResponseEventListener
+          )
+      );
     } catch (Throwable ex) {
       handleCallException(ex);
       throw ex;

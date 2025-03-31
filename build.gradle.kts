@@ -78,6 +78,7 @@ dependencies {
   implementation(libs.jsoup)
   implementation(libs.commons.text)
   implementation(libs.jtokkit)
+  implementation(libs.mcp)
   implementation(libs.grpc.protobuf)
   implementation(libs.grpc.stub)
   implementation(libs.grpc.netty.shaded)

@@ -1,10 +1,11 @@
 package ee.carlrobert.codegpt.toolwindow.chat.ui;
 
-import static ee.carlrobert.codegpt.toolwindow.chat.StreamResponseType.CODE;
+import static ee.carlrobert.codegpt.toolwindow.chat.StreamResponseType.*;
 import static ee.carlrobert.codegpt.util.MarkdownUtil.convertMdToHtml;
 import static java.lang.String.format;
 import static javax.swing.event.HyperlinkEvent.EventType.ACTIVATED;
 
+import ee.carlrobert.codegpt.toolwindow.ui.ToolPanel;
 import com.intellij.icons.AllIcons;
 import com.intellij.icons.AllIcons.General;
 import com.intellij.openapi.Disposable;
@@ -39,6 +40,7 @@ import ee.carlrobert.codegpt.settings.GeneralSettingsConfigurable;
 import ee.carlrobert.codegpt.settings.service.ServiceType;
 import ee.carlrobert.codegpt.telemetry.TelemetryAction;
 import ee.carlrobert.codegpt.toolwindow.chat.StreamParser;
+import ee.carlrobert.codegpt.toolwindow.chat.StreamResponseType;
 import ee.carlrobert.codegpt.toolwindow.chat.ThinkingOutputParser;
 import ee.carlrobert.codegpt.toolwindow.chat.editor.ResponseEditorPanel;
 import ee.carlrobert.codegpt.toolwindow.chat.editor.actions.CopyAction;
@@ -71,6 +73,7 @@ public class ChatMessageResponseBody extends JPanel {
   private final WebpageList webpageList = new WebpageList(webpageListModel);
   private final ResponseBodyProgressPanel progressPanel = new ResponseBodyProgressPanel();
   private ResponseEditorPanel currentlyProcessedEditorPanel;
+  private ToolPanel currentlyProcessedToolPanel;
   private JEditorPane currentlyProcessedTextPane;
   private JPanel webpageListPanel;
 
@@ -107,7 +110,11 @@ public class ChatMessageResponseBody extends JPanel {
   public ChatMessageResponseBody withResponse(@NotNull String response) {
     try {
       for (var message : MarkdownUtil.splitCodeBlocks(response)) {
-        processResponse(message, message.startsWith("```"), false);
+        if (message.startsWith("```")) {
+          processResponse(message, CODE, false);
+        } else {
+          processResponse(message, TEXT, false);
+        }
 
         currentlyProcessedTextPane = null;
         currentlyProcessedEditorPanel = null;
@@ -129,7 +136,7 @@ public class ChatMessageResponseBody extends JPanel {
     }
 
     for (var item : streamParser.parse(processedPartialMessage)) {
-      processResponse(item.response(), CODE.equals(item.type()), true);
+      processResponse(item.response(), item.type(), true);
     }
   }
 
@@ -270,9 +277,11 @@ public class ChatMessageResponseBody extends JPanel {
         .orElse(null);
   }
 
-  private void processResponse(String markdownInput, boolean codeResponse, boolean caretVisible) {
-    if (codeResponse) {
+  private void processResponse(String markdownInput, StreamResponseType responseType, boolean caretVisible) {
+    if (CODE.equals(responseType)) {
       processCode(markdownInput);
+    } else if (TOOL.equals(responseType)) {
+      processTool(markdownInput);
     } else {
       processText(markdownInput, caretVisible);
     }
@@ -301,15 +310,49 @@ public class ChatMessageResponseBody extends JPanel {
     currentlyProcessedTextPane.setText(html);
   }
 
+  private void processTool(String toolRequest) {
+    if (currentlyProcessedToolPanel == null) {
+      prepareProcessingTool();
+    }
+    currentlyProcessedToolPanel.setToolRequest(toolRequest);
+  }
+
+  public void updateToolInfo(String serverName, String toolName) {
+    if (currentlyProcessedToolPanel != null) {
+      currentlyProcessedToolPanel.setToolInfo(toolName, serverName);
+    }
+  }
+
+  public void updateToolResponse(String toolResponse) {
+    if (currentlyProcessedToolPanel != null) {
+      currentlyProcessedToolPanel.setToolResult(toolResponse);
+    }
+  }
+
   private void prepareProcessingText(boolean caretVisible) {
     currentlyProcessedEditorPanel = null;
+    currentlyProcessedToolPanel = null;
+
     currentlyProcessedTextPane = createTextPane("", caretVisible);
     add(currentlyProcessedTextPane);
   }
 
+  private void prepareProcessingTool() {
+    hideCaret();
+
+    currentlyProcessedTextPane = null;
+    currentlyProcessedEditorPanel = null;
+
+    currentlyProcessedToolPanel = new ToolPanel(project, parentDisposable);
+    add(currentlyProcessedToolPanel);
+  }
+
   private void prepareProcessingCode(String code, String markdownLanguage) {
     hideCaret();
+
     currentlyProcessedTextPane = null;
+    currentlyProcessedToolPanel = null;
+
     currentlyProcessedEditorPanel =
         new ResponseEditorPanel(project, code, markdownLanguage, readOnly, parentDisposable);
     add(currentlyProcessedEditorPanel);
