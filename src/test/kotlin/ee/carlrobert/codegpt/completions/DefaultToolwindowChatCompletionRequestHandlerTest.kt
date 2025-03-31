@@ -2,14 +2,16 @@ package ee.carlrobert.codegpt.completions
 
 import com.intellij.openapi.components.service
 import ee.carlrobert.codegpt.completions.llama.PromptTemplate.LLAMA
+import ee.carlrobert.codegpt.conversations.Conversation
 import ee.carlrobert.codegpt.conversations.ConversationService
 import ee.carlrobert.codegpt.conversations.message.Message
+import ee.carlrobert.codegpt.events.CodeGPTEvent
 import ee.carlrobert.codegpt.settings.configuration.ConfigurationSettings
-import ee.carlrobert.codegpt.settings.persona.PersonaSettings
 import ee.carlrobert.codegpt.settings.prompts.PromptsSettings
 import ee.carlrobert.llm.client.http.RequestEntity
 import ee.carlrobert.llm.client.http.exchange.NdJsonStreamHttpExchange
 import ee.carlrobert.llm.client.http.exchange.StreamHttpExchange
+import ee.carlrobert.llm.client.openai.completion.ErrorDetails
 import ee.carlrobert.llm.client.util.JSONUtil.*
 import org.apache.http.HttpHeaders
 import org.assertj.core.api.Assertions.assertThat
@@ -274,6 +276,12 @@ class DefaultToolwindowChatCompletionRequestHandlerTest : IntegrationTest() {
             ) {
                 message.response = fullMessage
             }
+
+            override fun handleCodeGPTEvent(event: CodeGPTEvent?) = Unit
+            override fun handleRequestOpen() = Unit
+            override fun handleMessage(message: String?) = Unit
+            override fun handleError(error: ErrorDetails?, ex: Throwable?) = Unit
+            override fun handleTokensExceeded(conversation: Conversation?, message: Message?) = Unit
         }
     }
 }

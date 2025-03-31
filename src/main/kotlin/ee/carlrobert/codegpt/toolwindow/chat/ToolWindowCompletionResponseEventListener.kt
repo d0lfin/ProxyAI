@@ -1,168 +1,153 @@
-package ee.carlrobert.codegpt.toolwindow.chat;
+package ee.carlrobert.codegpt.toolwindow.chat
 
-import static com.intellij.openapi.ui.Messages.OK;
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.Messages
+import ee.carlrobert.codegpt.EncodingManager
+import ee.carlrobert.codegpt.codecompletions.CompletionProgressNotifier.Companion.update
+import ee.carlrobert.codegpt.completions.ChatCompletionParameters
+import ee.carlrobert.codegpt.completions.CompletionResponseEventListener
+import ee.carlrobert.codegpt.conversations.Conversation
+import ee.carlrobert.codegpt.conversations.ConversationService
+import ee.carlrobert.codegpt.conversations.message.Message
+import ee.carlrobert.codegpt.events.CodeGPTEvent
+import ee.carlrobert.codegpt.telemetry.TelemetryAction
+import ee.carlrobert.codegpt.toolwindow.chat.ui.ChatMessageResponseBody
+import ee.carlrobert.codegpt.toolwindow.chat.ui.textarea.TotalTokensPanel
+import ee.carlrobert.codegpt.toolwindow.ui.ResponseMessagePanel
+import ee.carlrobert.codegpt.toolwindow.ui.UserMessagePanel
+import ee.carlrobert.codegpt.ui.OverlayUtil
+import ee.carlrobert.codegpt.ui.textarea.UserInputPanel
+import ee.carlrobert.llm.client.openai.completion.ErrorDetails
+import java.awt.event.ActionEvent
+import java.util.concurrent.ConcurrentLinkedQueue
+import javax.swing.Timer
 
-import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.diagnostic.Logger;
-import com.intellij.openapi.project.Project;
-import ee.carlrobert.codegpt.EncodingManager;
-import ee.carlrobert.codegpt.codecompletions.CompletionProgressNotifier;
-import ee.carlrobert.codegpt.completions.ChatCompletionParameters;
-import ee.carlrobert.codegpt.completions.CompletionResponseEventListener;
-import ee.carlrobert.codegpt.conversations.Conversation;
-import ee.carlrobert.codegpt.conversations.ConversationService;
-import ee.carlrobert.codegpt.conversations.message.Message;
-import ee.carlrobert.codegpt.events.CodeGPTEvent;
-import ee.carlrobert.codegpt.telemetry.TelemetryAction;
-import ee.carlrobert.codegpt.toolwindow.chat.ui.ChatMessageResponseBody;
-import ee.carlrobert.codegpt.toolwindow.chat.ui.textarea.TotalTokensPanel;
-import ee.carlrobert.codegpt.toolwindow.ui.ResponseMessagePanel;
-import ee.carlrobert.codegpt.toolwindow.ui.UserMessagePanel;
-import ee.carlrobert.codegpt.ui.OverlayUtil;
-import ee.carlrobert.codegpt.ui.textarea.UserInputPanel;
-import ee.carlrobert.llm.client.openai.completion.ErrorDetails;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import javax.swing.Timer;
+internal abstract class ToolWindowCompletionResponseEventListener(
+    private val project: Project,
+    private val userMessagePanel: UserMessagePanel,
+    private val responsePanel: ResponseMessagePanel,
+    private val totalTokensPanel: TotalTokensPanel,
+    private val textArea: UserInputPanel
+) : CompletionResponseEventListener {
+    private val messageBuilder = StringBuilder()
+    private val encodingManager: EncodingManager = EncodingManager.getInstance()
+    private val responseContainer = responsePanel.getContent() as ChatMessageResponseBody
 
-abstract class ToolWindowCompletionResponseEventListener implements
-    CompletionResponseEventListener {
+    private val updateTimer = Timer(
+        UPDATE_INTERVAL_MS
+    ) { _: ActionEvent? -> processBufferedMessages() }
+    private val messageBuffer = ConcurrentLinkedQueue<String>()
+    private var stopped = false
+    private var streamResponseReceived = false
 
-  private static final Logger LOG = Logger.getInstance(
-      ToolWindowCompletionResponseEventListener.class);
-  private static final int UPDATE_INTERVAL_MS = 8;
+    abstract fun handleTokensExceededPolicyAccepted()
 
-  private final Project project;
-  private final StringBuilder messageBuilder = new StringBuilder();
-  private final EncodingManager encodingManager;
-  private final ResponseMessagePanel responsePanel;
-  private final UserMessagePanel userMessagePanel;
-  private final ChatMessageResponseBody responseContainer;
-  private final TotalTokensPanel totalTokensPanel;
-  private final UserInputPanel textArea;
-
-  private final Timer updateTimer = new Timer(UPDATE_INTERVAL_MS, e -> processBufferedMessages());
-  private final ConcurrentLinkedQueue<String> messageBuffer = new ConcurrentLinkedQueue<>();
-  private boolean stopped = false;
-  private boolean streamResponseReceived = false;
-
-  public ToolWindowCompletionResponseEventListener(
-      Project project,
-      UserMessagePanel userMessagePanel,
-      ResponseMessagePanel responsePanel,
-      TotalTokensPanel totalTokensPanel,
-      UserInputPanel textArea) {
-    this.encodingManager = EncodingManager.getInstance();
-    this.project = project;
-    this.userMessagePanel = userMessagePanel;
-    this.responsePanel = responsePanel;
-    this.responseContainer = (ChatMessageResponseBody) responsePanel.getContent();
-    this.totalTokensPanel = totalTokensPanel;
-    this.textArea = textArea;
-  }
-
-  public abstract void handleTokensExceededPolicyAccepted();
-
-  @Override
-  public void handleRequestOpen() {
-    updateTimer.start();
-  }
-
-  @Override
-  public void handleMessage(String partialMessage) {
-    streamResponseReceived = true;
-
-    try {
-      messageBuilder.append(partialMessage);
-      var ongoingTokens = encodingManager.countTokens(messageBuilder.toString());
-      messageBuffer.offer(partialMessage);
-      ApplicationManager.getApplication().invokeLater(() ->
-          totalTokensPanel.update(totalTokensPanel.getTokenDetails().getTotal() + ongoingTokens)
-      );
-    } catch (Exception e) {
-      responseContainer.displayError("Something went wrong.");
-      throw new RuntimeException("Error while updating the content", e);
+    override fun handleRequestOpen() {
+        updateTimer.start()
     }
-  }
 
-  @Override
-  public void handleError(ErrorDetails error, Throwable ex) {
-    ApplicationManager.getApplication().invokeLater(() -> {
-      try {
-        if ("insufficient_quota".equals(error.getCode())) {
-          responseContainer.displayQuotaExceeded();
-        } else {
-          responseContainer.displayError(error.getMessage());
+    override fun handleMessage(partialMessage: String) {
+        streamResponseReceived = true
+
+        try {
+            messageBuilder.append(partialMessage)
+            val ongoingTokens = encodingManager.countTokens(messageBuilder.toString())
+            messageBuffer.offer(partialMessage)
+            ApplicationManager.getApplication().invokeLater {
+                totalTokensPanel.update(
+                    totalTokensPanel.tokenDetails.total + ongoingTokens
+                )
+            }
+        } catch (e: Exception) {
+            responseContainer.displayError("Something went wrong.")
+            throw RuntimeException("Error while updating the content", e)
         }
-      } finally {
-        stopStreaming(responseContainer);
-      }
-    });
-  }
+    }
 
-  @Override
-  public void handleTokensExceeded(Conversation conversation, Message message) {
-    ApplicationManager.getApplication().invokeLater(() -> {
-      var answer = OverlayUtil.showTokenLimitExceededDialog();
-      if (answer == OK) {
-        TelemetryAction.IDE_ACTION.createActionMessage()
-            .property("action", "DISCARD_TOKEN_LIMIT")
-            .property("model", conversation.getModel())
-            .send();
-
-        ConversationService.getInstance().discardTokenLimits(conversation);
-        handleTokensExceededPolicyAccepted();
-      } else {
-        stopStreaming(responseContainer);
-      }
-    });
-  }
-
-  @Override
-  public void handleCompleted(String fullMessage, ChatCompletionParameters callParameters) {
-    ConversationService.getInstance().saveMessage(fullMessage, callParameters);
-
-    ApplicationManager.getApplication().invokeLater(() -> {
-      try {
-        responsePanel.enableAllActions(true);
-        if (!streamResponseReceived && !fullMessage.isEmpty()) {
-          responseContainer.withResponse(fullMessage);
+    override fun handleError(error: ErrorDetails, ex: Throwable) {
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                if ("insufficient_quota" == error.code) {
+                    responseContainer.displayQuotaExceeded()
+                } else {
+                    responseContainer.displayError(error.message)
+                }
+            } finally {
+                stopStreaming(responseContainer)
+            }
         }
-        totalTokensPanel.updateUserPromptTokens(textArea.getText());
-        totalTokensPanel.updateConversationTokens(callParameters.getConversation());
-      } finally {
-        stopStreaming(responseContainer);
-      }
-    });
-  }
-
-  @Override
-  public void handleCodeGPTEvent(CodeGPTEvent event) {
-    responseContainer.handleCodeGPTEvent(event);
-  }
-
-  private void processBufferedMessages() {
-    if (messageBuffer.isEmpty()) {
-      if (stopped) {
-        updateTimer.stop();
-      }
-      return;
     }
 
-    StringBuilder accumulatedMessage = new StringBuilder();
-    String message;
-    while ((message = messageBuffer.poll()) != null) {
-      accumulatedMessage.append(message);
+    override fun handleTokensExceeded(conversation: Conversation, message: Message) {
+        ApplicationManager.getApplication().invokeLater {
+            val answer = OverlayUtil.showTokenLimitExceededDialog()
+            if (answer == Messages.OK) {
+                TelemetryAction.IDE_ACTION.createActionMessage()
+                    .property("action", "DISCARD_TOKEN_LIMIT")
+                    .property("model", conversation.model)
+                    .send()
+
+                ConversationService.getInstance().discardTokenLimits(conversation)
+                handleTokensExceededPolicyAccepted()
+            } else {
+                stopStreaming(responseContainer)
+            }
+        }
     }
 
-    responseContainer.updateMessage(accumulatedMessage.toString());
-  }
+    override fun handleCompleted(fullMessage: String, callParameters: ChatCompletionParameters) {
+        ConversationService.getInstance().saveMessage(fullMessage, callParameters)
 
-  private void stopStreaming(ChatMessageResponseBody responseContainer) {
-    stopped = true;
-    textArea.setSubmitEnabled(true);
-    userMessagePanel.enableAllActions(true);
-    responsePanel.enableAllActions(true);
-    responseContainer.hideCaret();
-    CompletionProgressNotifier.update(project, false);
-  }
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                responsePanel.enableAllActions(true)
+                if (!streamResponseReceived && !fullMessage.isEmpty()) {
+                    responseContainer.withResponse(fullMessage)
+                }
+                totalTokensPanel.updateUserPromptTokens(textArea.text)
+                totalTokensPanel.updateConversationTokens(callParameters.conversation)
+            } finally {
+                stopStreaming(responseContainer)
+            }
+        }
+    }
+
+    override fun handleCodeGPTEvent(event: CodeGPTEvent) {
+        responseContainer.handleCodeGPTEvent(event)
+    }
+
+    private fun processBufferedMessages() {
+        if (messageBuffer.isEmpty()) {
+            if (stopped) {
+                updateTimer.stop()
+            }
+            return
+        }
+
+        val accumulatedMessage = StringBuilder()
+        var message: String?
+        while ((messageBuffer.poll().also { message = it }) != null) {
+            accumulatedMessage.append(message)
+        }
+
+        responseContainer.updateMessage(accumulatedMessage.toString())
+    }
+
+    private fun stopStreaming(responseContainer: ChatMessageResponseBody) {
+        stopped = true
+        textArea.setSubmitEnabled(true)
+        userMessagePanel.enableAllActions(true)
+        responsePanel.enableAllActions(true)
+        responseContainer.hideCaret()
+        update(project, false)
+    }
+
+    companion object {
+        private val LOG = Logger.getInstance(
+            ToolWindowCompletionResponseEventListener::class.java
+        )
+        private const val UPDATE_INTERVAL_MS = 8
+    }
 }
