@@ -11,11 +11,6 @@ import ee.carlrobert.codegpt.toolwindow.ui.ResponseMessagePanel
 import ee.carlrobert.llm.client.openai.completion.ErrorDetails
 import io.modelcontextprotocol.kotlin.sdk.CallToolResultBase
 import io.modelcontextprotocol.kotlin.sdk.TextContent
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObject.Companion.serializer
-import kotlinx.serialization.json.JsonPrimitive
-import java.util.regex.Pattern
 
 class MCPCompletionResponseEventListener(
     private val project: Project,
@@ -23,16 +18,13 @@ class MCPCompletionResponseEventListener(
     private val completionResponseEventListener: CompletionResponseEventListener
 ): CompletionResponseEventListener by completionResponseEventListener {
 
-    private val toolPattern = Pattern.compile("^.*?(\\{.+\"tool\".+\\}).*?$", Pattern.DOTALL)
     private val mcpClientService = service<MCPClientService>()
 
     override fun handleCompleted(fullMessage: String, callParameters: ChatCompletionParameters) {
-        try {
-            val tool = parseToolRequest(fullMessage)
-
+        mcpClientService.getTool(fullMessage)?.let { tool ->
             responseMessagePanel.showPermissionsButtons(
                 onAllow = {
-                    executeTool(tool.first, tool.second, callParameters)
+                    executeTool(tool, callParameters)
                     responseMessagePanel.hidePermissionsButtons()
                 },
                 onDeny = {
@@ -40,28 +32,13 @@ class MCPCompletionResponseEventListener(
                     responseMessagePanel.hidePermissionsButtons()
                 }
             )
-        } catch (_: Exception) {
+        } ?: run {
             completionResponseEventListener.handleCompleted(fullMessage, callParameters)
         }
     }
 
-    private fun parseToolRequest(fullMessage: String): Pair<String, Map<String, Any>> {
-        val json = toolPattern.matcher(fullMessage).replaceAll("$1")
-        val response = Json.decodeFromString(serializer(), json)
-
-        val arguments = HashMap<String, Any>()
-        val argumentsJson = response["arguments"] as JsonObject?
-        if (argumentsJson != null) {
-            for ((key, value) in argumentsJson) {
-                arguments[key] = value
-            }
-        }
-
-        return (response["tool"] as JsonPrimitive).content to arguments
-    }
-
-    private fun executeTool(tool: String, arguments: Map<String, Any>, callParameters: ChatCompletionParameters) {
-        mcpClientService.executeTool(tool, arguments, object : MCPClientService.Callback {
+    private fun executeTool(tool: MCPClientService.ToolRequest, callParameters: ChatCompletionParameters) {
+        mcpClientService.executeTool(tool, object : MCPClientService.Callback {
             override fun onResult(callToolResult: CallToolResultBase) {
                 if (callToolResult.isError == true) {
                     onError()

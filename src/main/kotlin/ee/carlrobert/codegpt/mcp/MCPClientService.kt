@@ -15,10 +15,9 @@ import kotlinx.coroutines.*
 import kotlinx.io.asSink
 import kotlinx.io.asSource
 import kotlinx.io.buffered
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonObject.Companion.serializer
+import java.util.regex.Pattern
 
 private const val TOOLS_PLACEHOLDER = "{TOOLS}"
 
@@ -31,6 +30,7 @@ class MCPClientService private constructor() : Disposable {
     }
 
     private val scope = CoroutineScope(Dispatchers.IO)
+    private val toolPattern = Pattern.compile("^.*?(\\{.+\"tool\".+\\}).*?$", Pattern.DOTALL)
     private val promptTemplate = getResourceContent("/prompts/mcp.txt")
     private val config = service<MCPSettings>().state.configuration?.let {
         try {
@@ -40,22 +40,43 @@ class MCPClientService private constructor() : Disposable {
         }
     }
 
-    private val tools = scope.async { prepareTools() }
+    private val deferredTools = scope.async { prepareTools() }
+    private val tools
+        get() = runBlocking { deferredTools.await() }
 
     val mcpDescription by lazy {
-        val toolsDescription = runBlocking { tools.await().values }
-        if (toolsDescription.isEmpty()) {
+        if (tools.values.isEmpty()) {
             ""
         } else {
-            promptTemplate.replace(TOOLS_PLACEHOLDER, toolsDescription.joinToString("\n") { it.description })
+            promptTemplate.replace(TOOLS_PLACEHOLDER, tools.values.joinToString("\n") { it.description })
         }
     }
 
-    fun executeTool(name: String, arguments: Map<String, Any?>, callback: Callback) = scope.launch {
-        val client = tools.await()[name]?.client
-        client?.callTool(name, arguments)?.let { callback.onResult(it) } ?: run { callback.onError() }
+    fun getTool(text: String): ToolRequest? = try {
+        val json = toolPattern.matcher(text).replaceAll("$1")
+        val response = Json.decodeFromString(serializer(), json)
+        val toolName = (response["tool"] as JsonPrimitive).content
+
+        val arguments = HashMap<String, Any>()
+        val argumentsJson = response["arguments"] as JsonObject?
+        if (argumentsJson != null) {
+            for ((key, value) in argumentsJson) {
+                arguments[key] = value
+            }
+        }
+
+        ToolRequest(tools.getValue(toolName).serverName, toolName, arguments)
+    } catch (_: Exception) {
+        null
     }
 
+    fun executeTool(toolRequest: ToolRequest, callback: Callback) = scope.launch {
+        tools[toolRequest.toolName]?.client?.callTool(toolRequest.toolName, toolRequest.arguments)?.let {
+            callback.onResult(it)
+        } ?: run {
+            callback.onError()
+        }
+    }
 
     private suspend fun prepareTools(): Map<String, ToolInfo> {
         config ?: return emptyMap()
@@ -86,7 +107,7 @@ class MCPClientService private constructor() : Disposable {
                 client.connect(transport)
 
                 client.listTools()?.tools?.forEach { tool ->
-                    toolsMap[tool.name] = ToolInfo(client, tool.asDescription())
+                    toolsMap[tool.name] = ToolInfo(client, serverName, tool.asDescription())
                 }
             } catch (e: Exception) {
                 process?.destroy()
@@ -99,11 +120,11 @@ class MCPClientService private constructor() : Disposable {
 
     override fun dispose() {
         runBlocking {
-            tools.await().values.map { it.client }.toSet().onEach { it.close() }
+            tools.values.map { it.client }.toSet().onEach { it.close() }
         }
     }
 
-    private data class ToolInfo(val client: Client, val description: String)
+    private data class ToolInfo(val client: Client, val serverName: String, val description: String)
 
     private fun Tool.asDescription(): String {
         val argumentsDescription = mutableListOf<String>()
@@ -123,4 +144,10 @@ class MCPClientService private constructor() : Disposable {
             ${argumentsDescription.joinToString("\n")}
         """.trimIndent()
     }
+
+    data class ToolRequest(
+        val serverName: String,
+        val toolName: String,
+        val arguments: Map<String, Any?>
+    )
 }
