@@ -7,6 +7,7 @@ import ee.carlrobert.codegpt.completions.ChatCompletionParameters.Companion.buil
 import ee.carlrobert.codegpt.completions.CompletionRequestFactory.Companion.getFactory
 import ee.carlrobert.codegpt.conversations.message.Message
 import ee.carlrobert.codegpt.settings.GeneralSettings
+import ee.carlrobert.codegpt.toolwindow.ui.ResponseMessagePanel
 import ee.carlrobert.llm.client.openai.completion.ErrorDetails
 import io.modelcontextprotocol.kotlin.sdk.CallToolResultBase
 import io.modelcontextprotocol.kotlin.sdk.TextContent
@@ -18,6 +19,7 @@ import java.util.regex.Pattern
 
 class MCPCompletionResponseEventListener(
     private val project: Project,
+    private val responseMessagePanel: ResponseMessagePanel,
     private val completionResponseEventListener: CompletionResponseEventListener
 ): CompletionResponseEventListener by completionResponseEventListener {
 
@@ -27,8 +29,17 @@ class MCPCompletionResponseEventListener(
     override fun handleCompleted(fullMessage: String, callParameters: ChatCompletionParameters) {
         try {
             val tool = parseToolRequest(fullMessage)
-            // request permission
-            executeTool(tool.first, tool.second, callParameters)
+
+            responseMessagePanel.showPermissionsButtons(
+                onAllow = {
+                    executeTool(tool.first, tool.second, callParameters)
+                    responseMessagePanel.hidePermissionsButtons()
+                },
+                onDeny = {
+                    completionResponseEventListener.handleCompleted(fullMessage, callParameters)
+                    responseMessagePanel.hidePermissionsButtons()
+                }
+            )
         } catch (_: Exception) {
             completionResponseEventListener.handleCompleted(fullMessage, callParameters)
         }
