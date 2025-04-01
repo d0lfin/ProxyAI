@@ -1,6 +1,6 @@
 package ee.carlrobert.codegpt.toolwindow.chat.ui;
 
-import static ee.carlrobert.codegpt.toolwindow.chat.StreamResponseType.CODE;
+import static ee.carlrobert.codegpt.toolwindow.chat.StreamResponseType.*;
 import static ee.carlrobert.codegpt.util.MarkdownUtil.convertMdToHtml;
 import static java.lang.String.format;
 import static javax.swing.event.HyperlinkEvent.EventType.ACTIVATED;
@@ -39,6 +39,7 @@ import ee.carlrobert.codegpt.settings.GeneralSettingsConfigurable;
 import ee.carlrobert.codegpt.settings.service.ServiceType;
 import ee.carlrobert.codegpt.telemetry.TelemetryAction;
 import ee.carlrobert.codegpt.toolwindow.chat.StreamParser;
+import ee.carlrobert.codegpt.toolwindow.chat.StreamResponseType;
 import ee.carlrobert.codegpt.toolwindow.chat.ThinkingOutputParser;
 import ee.carlrobert.codegpt.toolwindow.chat.editor.ResponseEditorPanel;
 import ee.carlrobert.codegpt.toolwindow.chat.editor.actions.CopyAction;
@@ -107,7 +108,11 @@ public class ChatMessageResponseBody extends JPanel {
   public ChatMessageResponseBody withResponse(@NotNull String response) {
     try {
       for (var message : MarkdownUtil.splitCodeBlocks(response)) {
-        processResponse(message, message.startsWith("```"), false);
+        if (message.startsWith("```")) {
+          processResponse(message, CODE, false);
+        } else {
+          processResponse(message, TEXT, false);
+        }
 
         currentlyProcessedTextPane = null;
         currentlyProcessedEditorPanel = null;
@@ -129,7 +134,7 @@ public class ChatMessageResponseBody extends JPanel {
     }
 
     for (var item : streamParser.parse(processedPartialMessage)) {
-      processResponse(item.response(), CODE.equals(item.type()), true);
+      processResponse(item.response(), item.type(), true);
     }
   }
 
@@ -270,9 +275,11 @@ public class ChatMessageResponseBody extends JPanel {
         .orElse(null);
   }
 
-  private void processResponse(String markdownInput, boolean codeResponse, boolean caretVisible) {
-    if (codeResponse) {
+  private void processResponse(String markdownInput, StreamResponseType responseType, boolean caretVisible) {
+    if (CODE.equals(responseType)) {
       processCode(markdownInput);
+    } else if (TOOL.equals(responseType)) {
+      processCode("```json\n" + markdownInput + "\n```");
     } else {
       processText(markdownInput, caretVisible);
     }
