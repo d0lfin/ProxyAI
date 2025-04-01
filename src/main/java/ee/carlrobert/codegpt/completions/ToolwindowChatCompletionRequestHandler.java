@@ -2,26 +2,21 @@ package ee.carlrobert.codegpt.completions;
 
 import com.intellij.openapi.project.Project;
 import ee.carlrobert.codegpt.codecompletions.CompletionProgressNotifier;
-import ee.carlrobert.codegpt.mcp.MCPCompletionResponseEventListener;
 import ee.carlrobert.codegpt.settings.GeneralSettings;
 import ee.carlrobert.codegpt.telemetry.TelemetryAction;
-import ee.carlrobert.codegpt.toolwindow.ui.ResponseMessagePanel;
 import ee.carlrobert.llm.client.openai.completion.ErrorDetails;
 import okhttp3.sse.EventSource;
 
 public class ToolwindowChatCompletionRequestHandler {
 
   private final Project project;
-  private final ResponseMessagePanel responseMessagePanel;
   private final CompletionResponseEventListener completionResponseEventListener;
   private EventSource eventSource;
 
   public ToolwindowChatCompletionRequestHandler(
       Project project,
-      ResponseMessagePanel responseMessagePanel,
       CompletionResponseEventListener completionResponseEventListener) {
       this.project = project;
-      this.responseMessagePanel = responseMessagePanel;
       this.completionResponseEventListener = completionResponseEventListener;
   }
 
@@ -54,7 +49,7 @@ public class ToolwindowChatCompletionRequestHandler {
           new ChatCompletionEventListener(
               project,
               callParameters,
-              new MCPCompletionResponseEventListener(project, responseMessagePanel, completionResponseEventListener)
+              completionResponseEventListener
           )
       );
     } catch (Throwable ex) {
