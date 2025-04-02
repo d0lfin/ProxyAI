@@ -7,6 +7,7 @@ import ee.carlrobert.codegpt.completions.ChatCompletionParameters.Companion.buil
 import ee.carlrobert.codegpt.completions.CompletionRequestFactory.Companion.getFactory
 import ee.carlrobert.codegpt.conversations.message.Message
 import ee.carlrobert.codegpt.settings.GeneralSettings
+import ee.carlrobert.codegpt.toolwindow.chat.ui.ChatMessageResponseBody
 import ee.carlrobert.codegpt.toolwindow.ui.ResponseMessagePanel
 import ee.carlrobert.llm.client.openai.completion.ErrorDetails
 import io.modelcontextprotocol.kotlin.sdk.CallToolResultBase
@@ -19,9 +20,11 @@ class MCPCompletionResponseEventListener(
 ): CompletionResponseEventListener by completionResponseEventListener {
 
     private val mcpClientService = service<MCPClientService>()
+    private val responseContainer = responseMessagePanel.getContent() as ChatMessageResponseBody
 
     override fun handleCompleted(fullMessage: String, callParameters: ChatCompletionParameters) {
         mcpClientService.getTool(fullMessage)?.let { tool ->
+            responseContainer.updateToolInfo(tool.serverName, tool.toolName)
             responseMessagePanel.showPermissionsButtons(
                 onAllow = {
                     executeTool(tool, callParameters)
@@ -57,6 +60,8 @@ class MCPCompletionResponseEventListener(
     }
 
     private fun handleToolResponse(toolResponse: String, callParameters: ChatCompletionParameters) {
+        responseContainer.updateToolResponse(toolResponse)
+
         val callWithToolResponseParameters = builder(callParameters.conversation, Message(toolResponse))
             .sessionId(callParameters.sessionId)
             .conversationType(callParameters.conversationType)
