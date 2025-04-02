@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project
 import ee.carlrobert.codegpt.completions.*
 import ee.carlrobert.codegpt.completions.ChatCompletionParameters.Companion.builder
 import ee.carlrobert.codegpt.completions.CompletionRequestFactory.Companion.getFactory
+import ee.carlrobert.codegpt.conversations.ConversationService
 import ee.carlrobert.codegpt.conversations.message.Message
 import ee.carlrobert.codegpt.settings.GeneralSettings
 import ee.carlrobert.codegpt.toolwindow.chat.ui.ChatMessageResponseBody
@@ -24,6 +25,8 @@ class MCPCompletionResponseEventListener(
 
     override fun handleCompleted(fullMessage: String, callParameters: ChatCompletionParameters) {
         mcpClientService.getTool(fullMessage)?.let { tool ->
+            ConversationService.getInstance().saveMessage(fullMessage, callParameters)
+
             responseContainer.updateToolInfo(tool.serverName, tool.toolName)
             responseMessagePanel.showPermissionsButtons(
                 onAllow = {
